@@ -56,6 +56,9 @@ static zend_class_entry *pimple_serviceprovider_ce;
 static zend_object_handlers pimple_closure_object_handlers;
 static zend_internal_function pimple_closure_invoker_function;
 
+static zend_class_entry *pimple_serviceiterator_ce;
+static zend_object_handlers pimple_serviceiterator_object_handlers;
+
 #define FETCH_DIM_HANDLERS_VARS 	pimple_object *pimple_obj = NULL; \
 									ulong index; \
 									pimple_obj = (pimple_object *)zend_object_store_get_object(object TSRMLS_CC); \
@@ -227,6 +230,17 @@ ZEND_END_ARG_INFO()
 
 static const zend_function_entry pimple_serviceprovider_iface_ce_functions[] = {
 	PHP_ABSTRACT_ME(ServiceProviderInterface, register, arginfo_serviceprovider_register)
+	PHP_FE_END
+};
+
+/* Pimple\ServiceIterator */
+ZEND_BEGIN_ARG_INFO_EX(arginfo_serviceiterator___construct, 0, 0, 2)
+ZEND_ARG_OBJ_INFO(0, pimple, Pimple\\Container, 0)
+ZEND_ARG_ARRAY_INFO(0, ids, 0)
+ZEND_END_ARG_INFO()
+
+static const zend_function_entry pimple_serviceiterator_ce_functions[] = {
+	PHP_ME(PimpleIterator, __construct, arginfo_serviceiterator___construct, ZEND_ACC_PUBLIC)
 	PHP_FE_END
 };
 
@@ -587,6 +601,153 @@ static void pimple_bucket_dtor(pimple_bucket_value *bucket)
 {
 	zval_ptr_dtor(&bucket->value);
 	pimple_free_bucket(bucket);
+}
+
+static void pimple_serviceiterator_free_object_storage(pimple_serviceiterator_object *obj TSRMLS_DC)
+{
+	zend_object_std_dtor(&obj->zobj TSRMLS_CC);
+
+	if (obj->pimple) {
+		zval_ptr_dtor(&obj->pimple);
+	}
+	if (obj->ids) {
+		zval_ptr_dtor(&obj->ids);
+	}
+
+	efree(obj);
+}
+
+static zend_object_value pimple_serviceiterator_object_create(zend_class_entry *ce TSRMLS_DC)
+{
+	zend_object_value retval;
+	pimple_serviceiterator_object *intern  = NULL;
+
+	intern = emalloc(sizeof(pimple_serviceiterator_object));
+	intern->pimple = NULL;
+	ZEND_OBJ_INIT(&intern->zobj, ce);
+
+	retval.handlers = &pimple_serviceiterator_object_handlers;
+	retval.handle   = zend_objects_store_put(
+		intern,
+		(zend_objects_store_dtor_t) zend_objects_destroy_object,
+		(zend_objects_free_object_storage_t) pimple_serviceiterator_free_object_storage,
+		NULL TSRMLS_CC
+	);
+
+	return retval;
+}
+
+static void pimple_serviceiterator_iterator_invalidate(zend_object_iterator *intern TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+
+	if (iter->current) {
+		/* We DON'T decrement the refcount as the ZVAL is managed by the pimple_ce class - zval_ptr_dtor(&iter->current); */
+		iter->current = NULL;
+	}
+}
+
+static void pimple_serviceiterator_iterator_dtor(zend_object_iterator *intern TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+	zval *object = (zval *) iter->intern.data;
+
+	pimple_serviceiterator_iterator_invalidate(intern TSRMLS_CC);
+	Z_DELREF_P(object);
+
+	efree(iter);
+}
+
+static int pimple_serviceiterator_iterator_valid(zend_object_iterator *intern TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+
+	return zend_hash_has_more_elements_ex(Z_ARRVAL_P(iter->subject->ids), &iter->ids_pos);
+}
+
+/* return $this->pimple[current($this->ids)] */
+static void pimple_serviceiterator_iterator_get_current_data(zend_object_iterator *intern, zval ***data TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+	zval **service_id;
+
+	if (!iter->current) {
+		if (zend_hash_get_current_data_ex(Z_ARRVAL_P(iter->subject->ids), (void **)&service_id, &iter->ids_pos) == SUCCESS) {
+			iter->current = pimple_object_read_dimension(iter->subject->pimple, *service_id, 0 TSRMLS_CC);
+		}
+	}
+	*data = &iter->current;
+}
+
+#if ZEND_MODULE_API_NO >= 20121212
+/* return current($this->ids) */
+static void pimple_serviceiterator_iterator_get_current_key(zend_object_iterator *intern, zval *key TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+	zval **value = NULL;
+
+	zend_hash_get_current_data_ex(Z_ARRVAL_P(iter->subject->ids), (void **)&value, &iter->ids_pos);
+
+	MAKE_COPY_ZVAL(value, key);
+}
+#else
+static int pimple_serviceiterator_iterator_get_current_key(zend_object_iterator *intern, char **str_key, uint *str_key_len, ulong *int_key TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+	zval **value;
+
+	zend_hash_get_current_data_ex(Z_ARRVAL_P(iter->subject->ids), (void **)&value, &iter->ids_pos);
+	*str_key     = estrdup(Z_STRVAL_P(*value));
+	*str_key_len = (ulong) Z_STRLEN_P(*value) + 1;
+
+	return HASH_KEY_IS_STRING;
+}
+#endif
+
+static void pimple_serviceiterator_iterator_move_forward(zend_object_iterator *intern TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+
+	pimple_serviceiterator_iterator_invalidate(intern TSRMLS_CC);
+	zend_hash_move_forward_ex(Z_ARRVAL_P(iter->subject->ids), &iter->ids_pos);
+}
+
+static void pimple_serviceiterator_iterator_rewind(zend_object_iterator *intern TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter = (pimple_serviceiterator_iterator *) intern;
+
+	pimple_serviceiterator_iterator_invalidate(intern TSRMLS_CC);
+	zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(iter->subject->ids), &iter->ids_pos);
+}
+
+static zend_object_iterator_funcs pimple_serviceiterator_iterator_funcs = {
+	pimple_serviceiterator_iterator_dtor,
+	pimple_serviceiterator_iterator_valid,
+	pimple_serviceiterator_iterator_get_current_data,
+	pimple_serviceiterator_iterator_get_current_key,
+	pimple_serviceiterator_iterator_move_forward,
+	pimple_serviceiterator_iterator_rewind,
+	pimple_serviceiterator_iterator_invalidate
+};
+
+static zend_object_iterator *pimple_serviceiterator_get_iterator(zend_class_entry *ce, zval *object, int by_ref TSRMLS_DC)
+{
+	pimple_serviceiterator_iterator *iter;
+
+	if (by_ref) {
+		zend_throw_exception(NULL, "Cannot iterate ServiceIterator by reference", 0 TSRMLS_CC);
+		return NULL;
+	}
+
+	Z_ADDREF_P(object);
+
+	iter = emalloc(sizeof(pimple_serviceiterator_iterator));
+	iter->intern.data = (void *) object;
+	iter->intern.funcs = &pimple_serviceiterator_iterator_funcs;
+	iter->subject = (pimple_serviceiterator_object *) zend_object_store_get_object(object TSRMLS_CC);
+	iter->current = NULL;
+
+	return (zend_object_iterator *) iter;
 }
 
 PHP_METHOD(FrozenServiceException, __construct)
@@ -1003,11 +1164,29 @@ PHP_METHOD(PimpleClosure, invoker)
 	RETVAL_ZVAL(newretval, 1 ,1);
 }
 
+PHP_METHOD(PimpleIterator, __construct)
+{
+	zval *pimple;
+	zval *ids;
+	pimple_serviceiterator_object *intern;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "Oa", &pimple, pimple_ce, &ids) == FAILURE) {
+		return;
+	}
+
+	intern = zend_object_store_get_object(getThis() TSRMLS_CC);
+	intern->pimple = pimple;
+	intern->ids = ids;
+	Z_ADDREF_P(pimple);
+	Z_ADDREF_P(ids);
+}
+
 PHP_MINIT_FUNCTION(pimple)
 {
 	zend_class_entry tmp_ce_PsrContainerInterface, tmp_ce_PsrContainerExceptionInterface, tmp_ce_PsrNotFoundExceptionInterface;
 	zend_class_entry tmp_ce_ExpectedInvokableException, tmp_ce_FrozenServiceException, tmp_ce_InvalidServiceIdentifierException, tmp_ce_UnknownIdentifierException;
 	zend_class_entry tmp_pimple_ce, tmp_pimple_closure_ce, tmp_pimple_serviceprovider_iface_ce;
+	zend_class_entry tmp_pimple_serviceiterator_ce;
 
 	/* Psr\Container namespace */
 	INIT_NS_CLASS_ENTRY(tmp_ce_PsrContainerInterface,          PSR_CONTAINER_NS, "ContainerInterface",           pimple_ce_PsrContainerInterface_functions);
@@ -1036,13 +1215,13 @@ PHP_MINIT_FUNCTION(pimple)
 	zend_class_implements(pimple_ce_InvalidServiceIdentifierException TSRMLS_CC, 1, pimple_ce_PsrContainerExceptionInterface);
 	zend_class_implements(pimple_ce_UnknownIdentifierException TSRMLS_CC,        1, pimple_ce_PsrNotFoundExceptionInterface);
 
-    /* Pimple namespace */
+	/* Pimple namespace */
 	INIT_NS_CLASS_ENTRY(tmp_pimple_ce, PIMPLE_NS, "Container", pimple_ce_functions);
 	INIT_NS_CLASS_ENTRY(tmp_pimple_closure_ce, PIMPLE_NS, "ContainerClosure", NULL);
 	INIT_NS_CLASS_ENTRY(tmp_pimple_serviceprovider_iface_ce, PIMPLE_NS, "ServiceProviderInterface", pimple_serviceprovider_iface_ce_functions);
 
-	tmp_pimple_ce.create_object         = pimple_object_create;
-	tmp_pimple_closure_ce.create_object = pimple_closure_object_create;
+	tmp_pimple_ce.create_object                 = pimple_object_create;
+	tmp_pimple_closure_ce.create_object         = pimple_closure_object_create;
 
 	pimple_ce = zend_register_internal_class(&tmp_pimple_ce TSRMLS_CC);
 	zend_class_implements(pimple_ce TSRMLS_CC, 1, zend_ce_arrayaccess);
@@ -1064,6 +1243,16 @@ PHP_MINIT_FUNCTION(pimple)
 	pimple_closure_invoker_function.scope             = pimple_closure_ce;
 	pimple_closure_invoker_function.type              = ZEND_INTERNAL_FUNCTION;
 	pimple_closure_invoker_function.module            = &pimple_module_entry;
+
+	INIT_NS_CLASS_ENTRY(tmp_pimple_serviceiterator_ce, PIMPLE_NS, "ServiceIterator", pimple_serviceiterator_ce_functions);
+
+	pimple_serviceiterator_ce = zend_register_internal_class(&tmp_pimple_serviceiterator_ce TSRMLS_CC);
+	pimple_serviceiterator_ce->ce_flags      |= ZEND_ACC_FINAL_CLASS;
+	pimple_serviceiterator_ce->create_object = pimple_serviceiterator_object_create;
+	pimple_serviceiterator_ce->get_iterator  = pimple_serviceiterator_get_iterator;
+	pimple_serviceiterator_ce->iterator_funcs.funcs = &pimple_serviceiterator_iterator_funcs;
+	zend_class_implements(pimple_serviceiterator_ce TSRMLS_CC, 1, zend_ce_traversable);
+	memcpy(&pimple_serviceiterator_object_handlers, zend_get_std_object_handlers(), sizeof(*zend_get_std_object_handlers()));
 
 	return SUCCESS;
 }
