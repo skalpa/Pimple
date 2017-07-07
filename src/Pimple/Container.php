@@ -44,6 +44,7 @@ class Container implements \ArrayAccess
     private $frozen = array();
     private $raw = array();
     private $keys = array();
+    private $tags = array();
 
     /**
      * Instantiate the container.
@@ -268,6 +269,38 @@ class Container implements \ArrayAccess
     public function keys()
     {
         return array_keys($this->values);
+    }
+
+    /**
+     * Tags services.
+     *
+     * @param string       $tagName  The name of the tag to apply to services
+     * @param string|array $services Service name, array of service names, or array of tags attributes indexed by service name
+     */
+    public function tag($tagName, $services)
+    {
+        foreach ((array) $services as $id => $attributes) {
+            if (is_int($id)) {
+                $id = $attributes;
+                $attributes = array();
+            }
+            if (!isset($this->keys[$id])) {
+                throw new UnknownIdentifierException($id);
+            }
+            $this->tags[$tagName][$id] = $attributes;
+        }
+    }
+
+    /**
+     * Retrieves tags.
+     *
+     * @param string $tagName
+     *
+     * @return array Associative array of tags attributes indexed by service name
+     */
+    public function getTags($tagName)
+    {
+        return isset($this->tags[$tagName]) ? $this->tags[$tagName] : array();
     }
 
     /**
