@@ -582,4 +582,60 @@ class PimpleTest extends \PHPUnit_Framework_TestCase
         });
         $this->assertSame('bar.baz', $pimple['bar']);
     }
+
+    public function testTaggingSingleService()
+    {
+        $pimple = new Container();
+        $pimple['foo'] = function () {
+            return 'foo';
+        };
+        $pimple['bar'] = function () {
+            return 'bar';
+        };
+        $pimple->tag('tag', 'foo');
+
+        $this->assertSame(array('foo'), $pimple->taggedServices('tag'));
+        $this->assertSame(array('foo' => array()), $pimple->tagAttributes('tag'));
+    }
+
+    public function testTaggingMultipleServices()
+    {
+        $pimple = new Container();
+        $pimple['foo'] = function () {
+            return 'foo';
+        };
+        $pimple['bar'] = function () {
+            return 'bar';
+        };
+        $pimple->tag('tag', array('foo', 'bar'));
+
+        $this->assertSame(array('foo', 'bar'), $pimple->taggedServices('tag'));
+        $this->assertSame(array('foo' => array(), 'bar' => array()), $pimple->tagAttributes('tag'));
+    }
+
+    public function testTaggingWithAttributes()
+    {
+        $pimple = new Container();
+        $pimple['foo'] = function () {
+            return 'foo';
+        };
+        $pimple['bar'] = function () {
+            return 'bar';
+        };
+        $pimple->tag('tag', array('foo', 'bar' => array('name' => 'value')));
+
+        $this->assertSame(array('foo', 'bar'), $pimple->taggedServices('tag'));
+        $this->assertSame(array('foo' => array(), 'bar' => array('name' => 'value')), $pimple->tagAttributes('tag'));
+    }
+
+    /**
+     * @expectedException \Pimple\Exception\UnknownIdentifierException
+     * @expectedExceptionMessage Identifier "foo" is not defined.
+     */
+    public function testTaggingAnUnknownServiceFails()
+    {
+        $pimple = new Container();
+
+        $pimple->tag('tag', 'foo');
+    }
 }
