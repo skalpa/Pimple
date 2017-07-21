@@ -38,6 +38,11 @@ use Pimple\Exception\UnknownIdentifierException;
  */
 class Container implements \ArrayAccess
 {
+    private const TYPE_UNKNOWN = 0;
+    private const TYPE_PARAMETER = 1;
+    private const TYPE_SERVICE = 2;
+    private const TYPE_INITIALIZED = 3;
+
     private $values = array();
     private $factories;
     private $protected;
@@ -84,7 +89,47 @@ class Container implements \ArrayAccess
         }
 
         $this->values[$id] = $value;
-        $this->keys[$id] = true;
+        $this->keys[$id] = self::TYPE_UNKNOWN;
+    }
+
+    /**
+     * Sets parameter values
+     *
+     * @param string|array $id
+     * @param mixed        $value
+     */
+    public function assign($id, $value = null)
+    {
+        $values = is_array($id) ? $id : array($id => $value);
+
+        foreach ($values as $id => $value) {
+            if (isset($this->frozen[$id])) {
+                throw new FrozenServiceException($id);
+            }
+
+            $this->values[$id] = $value;
+            $this->keys[$id] = self::TYPE_PARAMETER;
+        }
+    }
+
+    /**
+     * Sets service definitions
+     *
+     * @param string|callable[] $id
+     * @param mixed             $value
+     */
+    public function set($id, $value = null)
+    {
+        $values = is_array($id) ? $id : array($id => $value);
+
+        foreach ($values as $id => $value) {
+            if (isset($this->frozen[$id])) {
+                throw new FrozenServiceException($id);
+            }
+
+            $this->values[$id] = $value;
+            $this->keys[$id] = self::TYPE_SERVICE;
+        }
     }
 
     /**
@@ -102,23 +147,28 @@ class Container implements \ArrayAccess
             throw new UnknownIdentifierException($id);
         }
 
-        if (
-            isset($this->raw[$id])
-            || !is_object($this->values[$id])
-            || isset($this->protected[$this->values[$id]])
-            || !method_exists($this->values[$id], '__invoke')
-        ) {
-            return $this->values[$id];
-        }
+        switch ($this->keys[$id]) {
+            case self::TYPE_PARAMETER:
+            case self::TYPE_INITIALIZED:
+                return $this->values[$id];
+            case self::TYPE_UNKNOWN:
+                if (!is_object($this->values[$id]) || isset($this->protected[$this->values[$id]]) || !method_exists($this->values[$id], '__invoke')) {
+                    $this->keys[$id] = self::TYPE_PARAMETER;
 
-        if (isset($this->factories[$this->values[$id]])) {
-            return $this->values[$id]($this);
+                    return $this->values[$id];
+                }
+                if (isset($this->factories[$this->values[$id]])) {
+                    return $this->values[$id]($this);
+                }
+
+                $this->keys[$id] = self::TYPE_SERVICE;
         }
 
         $raw = $this->values[$id];
         $val = $this->values[$id] = $raw($this);
         $this->raw[$id] = $raw;
 
+        $this->keys[$id] = self::TYPE_INITIALIZED;
         $this->frozen[$id] = true;
 
         return $val;
@@ -242,7 +292,11 @@ class Container implements \ArrayAccess
             throw new FrozenServiceException($id);
         }
 
-        if (!is_object($this->values[$id]) || !method_exists($this->values[$id], '__invoke') || isset($this->protected[$this->values[$id]])) {
+        if (self::TYPE_PARAMETER === $this->keys[$id]
+            || !is_object($this->values[$id])
+            || !method_exists($this->values[$id], '__invoke')
+            || isset($this->protected[$this->values[$id]])
+        ) {
             throw new InvalidServiceIdentifierException($id);
         }
 

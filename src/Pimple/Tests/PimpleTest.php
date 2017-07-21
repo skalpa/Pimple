@@ -67,6 +67,130 @@ class PimpleTest extends \PHPUnit_Framework_TestCase
         $this->assertNotSame($serviceOne, $serviceTwo);
     }
 
+    public function testAssigningExplicitParameter()
+    {
+        $closure = function () {};
+        $invokable = new Fixtures\Invokable();
+        $nonInvokable = new Fixtures\NonInvokable();
+
+        $pimple = new Container();
+        $pimple->assign('string', 'value');
+        $pimple->assign('closure', $closure);
+        $pimple->assign('invokable', $invokable);
+        $pimple->assign('non-invokable', $nonInvokable);
+
+        $this->assertSame('value', $pimple['string']);
+        $this->assertSame($closure, $pimple['closure']);
+        $this->assertSame($invokable, $pimple['invokable']);
+        $this->assertSame($nonInvokable, $pimple['non-invokable']);
+    }
+
+    public function testAssigningMultipleParameters()
+    {
+        $closure = function () {};
+        $invokable = new Fixtures\Invokable();
+        $nonInvokable = new Fixtures\NonInvokable();
+
+        $pimple = new Container();
+        $pimple->assign(array(
+            'string' => 'value',
+            'closure' => $closure,
+            'invokable' => $invokable,
+            'non-invokable' => $nonInvokable,
+        ));
+
+        $this->assertSame('value', $pimple['string']);
+        $this->assertSame($closure, $pimple['closure']);
+        $this->assertSame($invokable, $pimple['invokable']);
+        $this->assertSame($nonInvokable, $pimple['non-invokable']);
+    }
+
+    public function testSettingExplicitServiceWithClosure()
+    {
+        $pimple = new Container();
+
+        $pimple->set('service', function () {
+            return new Fixtures\Service();
+        });
+
+        $this->assertInstanceOf(Fixtures\Service::class, $pimple['service']);
+    }
+
+    public function testSettingExplicitServiceWithCallable()
+    {
+        $pimple = new Container();
+        $factory = new Fixtures\Factory();
+
+        $pimple->set('method', array($factory, 'create'));
+        $pimple->set('static', array(Fixtures\Factory::class, 'staticCreate'));
+
+        $this->assertInstanceOf(Fixtures\Service::class, $pimple['method']);
+        $this->assertInstanceOf(Fixtures\Service::class, $pimple['static']);
+    }
+
+    public function testSettingMultipleExplicitServices()
+    {
+        $pimple = new Container();
+        $factory = new Fixtures\Factory();
+
+        $pimple->set(array(
+            'closure' => function () {
+                return new Fixtures\Service();
+            },
+            'method' => array($factory, 'create'),
+            'static' => array(Fixtures\Factory::class, 'staticCreate'),
+        ));
+
+        $this->assertInstanceOf(Fixtures\Service::class, $pimple['closure']);
+        $this->assertInstanceOf(Fixtures\Service::class, $pimple['method']);
+        $this->assertInstanceOf(Fixtures\Service::class, $pimple['static']);
+    }
+
+    public function testExplicitServicesAreShared()
+    {
+        $pimple = new Container();
+
+        $pimple->set('service', function () {
+            return new Fixtures\Service();
+        });
+
+        $serviceOne = $pimple['service'];
+        $this->assertInstanceOf(Fixtures\Service::class, $serviceOne);
+
+        $serviceTwo = $pimple['service'];
+        $this->assertInstanceOf(Fixtures\Service::class, $serviceTwo);
+
+        $this->assertSame($serviceOne, $serviceTwo);
+    }
+
+    /**
+     * @expectedException \Pimple\Exception\FrozenServiceException
+     * @expectedExceptionMessage Cannot override frozen service "service".
+     */
+    public function testCannotExplicitelyAssignFrozenEntry()
+    {
+        $pimple = new Container();
+        $pimple->set('service', array(Fixtures\Factory::class, 'staticCreate'));
+
+        $pimple['service'];
+
+        $pimple->assign('service', 'value');
+    }
+
+    /**
+     * @expectedException \Pimple\Exception\FrozenServiceException
+     * @expectedExceptionMessage Cannot override frozen service "service".
+     */
+    public function testCannotExplicitelySetFrozenEntry()
+    {
+        $pimple = new Container();
+        $pimple->set('service', array(Fixtures\Factory::class, 'staticCreate'));
+
+        $pimple['service'];
+
+        $pimple->assign('service', 'value');
+    }
+
     public function testShouldPassContainerAsParameter()
     {
         $pimple = new Container();
@@ -88,11 +212,15 @@ class PimpleTest extends \PHPUnit_Framework_TestCase
         $pimple['service'] = function () {
             return new Fixtures\Service();
         };
+        $pimple->assign('ex-param', 'value');
+        $pimple->set('ex-service', array(Fixtures\Factory::class, 'staticCreate'));
 
         $pimple['null'] = null;
 
         $this->assertTrue(isset($pimple['param']));
         $this->assertTrue(isset($pimple['service']));
+        $this->assertTrue(isset($pimple['ex-param']));
+        $this->assertTrue(isset($pimple['ex-service']));
         $this->assertTrue(isset($pimple['null']));
         $this->assertFalse(isset($pimple['non_existent']));
     }
