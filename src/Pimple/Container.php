@@ -292,12 +292,14 @@ class Container implements \ArrayAccess
             throw new FrozenServiceException($id);
         }
 
-        if (self::TYPE_PARAMETER === $this->keys[$id]
-            || !is_object($this->values[$id])
-            || !method_exists($this->values[$id], '__invoke')
-            || isset($this->protected[$this->values[$id]])
-        ) {
-            throw new InvalidServiceIdentifierException($id);
+        if (self::TYPE_SERVICE !== $this->keys[$id]) {
+            if (self::TYPE_PARAMETER === $this->keys[$id]
+                || !is_object($this->values[$id])
+                || !method_exists($this->values[$id], '__invoke')
+                || isset($this->protected[$this->values[$id]])
+            ) {
+                throw new InvalidServiceIdentifierException($id);
+            }
         }
 
         if (!is_object($callable) || !method_exists($callable, '__invoke')) {
@@ -310,7 +312,7 @@ class Container implements \ArrayAccess
             return $callable($factory($c), $c);
         };
 
-        if (isset($this->factories[$factory])) {
+        if (is_object($factory) && isset($this->factories[$factory])) {
             $this->factories->detach($factory);
             $this->factories->attach($extended);
         }

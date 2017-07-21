@@ -28,13 +28,19 @@ namespace Pimple\Tests\Fixtures;
 
 class Factory
 {
-    public static function staticCreate()
+    public static function staticCreate($value)
     {
-        return new Service();
+        $service = new Service();
+        $service->value = $value;
+
+        return $service;
     }
 
-    public function create()
+    public function create($value)
     {
-        return new Service();
+        $service = new Service();
+        $service->value = $value;
+
+        return $service;
     }
 }

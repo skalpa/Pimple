@@ -694,6 +694,25 @@ class PimpleTest extends \PHPUnit_Framework_TestCase
         $this->assertSame('foo.bar.baz', $pimple['foo']);
     }
 
+    public function testExtendingExplicitService()
+    {
+        $pimple = new Container();
+        $pimple->set('foo', array(Fixtures\Factory::class, 'staticCreate'));
+
+        $pimple->extend('foo', function ($foo, $app) {
+            $foo->value = 'bar';
+
+            return $foo;
+        });
+        $pimple->extend('foo', function ($foo, $app) {
+            $foo->value .= '.baz';
+
+            return $foo;
+        });
+
+        $this->assertSame('bar.baz', $pimple['foo']->value);
+    }
+
     public function testExtendingServiceAfterOtherServiceFreeze()
     {
         $pimple = new Container();
